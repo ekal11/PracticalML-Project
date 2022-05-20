@@ -1,0 +1,145 @@
+---
+title: "CourseProject_PracticalMachineLearning"
+author: "Emile Kaldany"
+date: "5/20/2022"
+output: html_document
+---
+
+# R-script for Coursera Data Scientist Specialization -
+Practical Machine Learning, Course Project
+
+# SETUP
+Get necessary libraries
+```{r}
+library(ggplot2)
+library(caret)
+```
+
+Set seed for reproducability
+```{r}
+set.seed(11)
+```
+**********************************************************
+# DATA ORGANIZATION & CLEANING
+
+## load the data
+```{r}
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+
+Create partitions of training set to allow for further reducing the out-of-sample error prior to testing
+```{r}
+inTrain <- createDataPartition(y = training$classe, p=0.7, list=F)
+train1 <- training[inTrain, ]
+train2 <- training[-inTrain, ]
+```
+
+Remove variables with nearly zero variance
+```{r}
+nzv <- nearZeroVar(train1)
+train1 <- train1[, -nzv]
+train2 <- train2[, -nzv]
+```
+
+remove variables that are almost always NA
+```{r}
+mostlyNA <- sapply(train1, function(x) mean(is.na(x))) > 0.9
+
+train1 <- train1[, mostlyNA==F] 
+train2 <- train2[, mostlyNA==F]
+```
+
+Remove variables that don't make intuitive sense for prediction (X, user_name, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp), which happen to be the first five variables
+```{r}
+train1 <- train1[, -(1:5)]
+train2 <- train2[, -(1:5)]
+```
+
+**********************************************************
+# MODELS
+
+## Model 1 - Random Forest
+Start with a random forest model fit to train1 using 3-fold cross-validation to select optimal tuning parameters for the model.
+
+Instruct train to use 3-fold CV to select optimal tuning parameters for random forest
+```{r}
+fitControlrf <- trainControl(method="cv", number=3, verboseIter=F)
+fitrf <- train(classe ~ ., data=train1, method="rf", trControl=fitControlrf)
+fitrf$finalModel
+```
+
+The model decides to use 500 trees, each split tries 27 variables with an error rate of 0.18%, which is very low
+
+Use rf model to predict the validation set train2
+```{r}
+predsrf <- predict(fitrf, newdata=train2)
+```
+
+Confusion matrix to get estimate of out-of-sample error
+```{r}
+confusionMatrix(predsrf, as.factor(train2$classe))
+```
+
+The out-of-sample accuracy is .998, Kappa is .9974
+
+**********************************************************
+# Model 2 - Generalized Boosted Model
+We want to compare the random forest to generalized boosted model fit to train1 using 3-fold cross-validation to select optimal tuning parameters for the model.
+```{r}
+fitControlgbm <- trainControl(method = "repeatedcv", number = 3, repeats = 1)
+fitgbm  <- train(classe ~ ., data=train1, method = "gbm",
+                    trControl = fitControlgbm, verbose = FALSE)
+fitgbm$finalModel
+```
+The model decides to use 150 iterations
+
+
+Use gbm model to predict the validation set train2
+```{r}
+predsgbm <- predict(fitgbm, newdata=train2)
+```
+
+Confusion matrix to get estimate of out-of-sample error
+```{r}
+confusionMatrix(predsgbm, as.factor(train2$classe))
+```
+The out-of-sample accuracy is .989, Kappa is .985
+
+The random forest is the most accurate and will be used for the final prediction on the test set
+
+
+**********************************************************
+# FINAL PREDICTION
+
+Clean testing exactly as we did the training sets
+```{r}
+testing <- testing[, -nzv]
+testing <- testing[, mostlyNA==F] 
+testing <- testing[, -(1:5)]
+```
+
+Predict on test set
+```{r}
+preds <- predict(fitrf, newdata=testing)
+```
+
+Convert predictions to character vector
+```{r}
+preds <- as.character(preds)
+```
+
+Create function to write predictions to files
+```{r}
+pml_write_files <- function(x) {
+        n <- length(x)
+        for(i in 1:n) {
+                filename <- paste0("problem_id_", i, ".txt")
+                write.table(x[i], file=filename, quote=F, row.names=F, col.names=F)
+        }
+}
+
+# create prediction files to submit
+pml_write_files(preds)
+
+```
